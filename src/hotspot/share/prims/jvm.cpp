@@ -3023,8 +3023,10 @@ JVM_END
 
 
 JVM_ENTRY(void, JVM_Yield(JNIEnv *env, jclass threadClass))
+  // 是否设置了DontYieldALot参数,默认为false。为true则直接返回
   if (os::dont_yield()) return;
   HOTSPOT_THREAD_YIELD();
+  // 调用系统的naked_yield
   os::naked_yield();
 JVM_END
 
@@ -3040,6 +3042,7 @@ JVM_ENTRY(void, JVM_Sleep(JNIEnv* env, jclass threadClass, jlong millis))
     THROW_MSG(vmSymbols::java_lang_IllegalArgumentException(), "timeout value is negative");
   }
 
+  // 如果线程被中断，抛出中断异常
   if (thread->is_interrupted(true) && !HAS_PENDING_EXCEPTION) {
     THROW_MSG(vmSymbols::java_lang_InterruptedException(), "sleep interrupted");
   }
@@ -3052,10 +3055,12 @@ JVM_ENTRY(void, JVM_Sleep(JNIEnv* env, jclass threadClass, jlong millis))
   EventThreadSleep event;
 
   if (millis == 0) {
+    // 如果sleep(0),效果等同于yield
     os::naked_yield();
   } else {
     ThreadState old_state = thread->osthread()->get_state();
     thread->osthread()->set_state(SLEEPING);
+    // 如果睡眠期间被中断,抛出异常
     if (!thread->sleep(millis)) { // interrupted
       // An asynchronous exception (e.g., ThreadDeathException) could have been thrown on
       // us while we were sleeping. We do not overwrite those.
@@ -3063,6 +3068,7 @@ JVM_ENTRY(void, JVM_Sleep(JNIEnv* env, jclass threadClass, jlong millis))
         if (event.should_commit()) {
           post_thread_sleep_event(&event, millis);
         }
+        // 设置异常结束，正常结束见末尾为0
         HOTSPOT_THREAD_SLEEP_END(1);
 
         // TODO-FIXME: THROW_MSG returns which means we will not call set_state()
@@ -3070,6 +3076,7 @@ JVM_ENTRY(void, JVM_Sleep(JNIEnv* env, jclass threadClass, jlong millis))
         THROW_MSG(vmSymbols::java_lang_InterruptedException(), "sleep interrupted");
       }
     }
+    // sleep结束，重新设置为旧状态
     thread->osthread()->set_state(old_state);
   }
   if (event.should_commit()) {
